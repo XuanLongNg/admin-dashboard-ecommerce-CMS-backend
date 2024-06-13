@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Product } from '@/modules/product/entities/product.entity';
 import { Repository } from 'typeorm';
@@ -10,10 +10,13 @@ import {
 import { Review } from '@/modules/reviews/entities/review.entity';
 import {
   EFilterOption,
+  EProductField,
   ERatingField,
+  ESort,
 } from '@/modules/dashboard/enums/dashboard-product.enum';
 import { Order } from '@/modules/order/entities/order.entity';
-import { Document, Packer, Paragraph, TextRun } from 'docx';
+import { Packer } from 'docx';
+import { TemplateService } from '@/modules/dashboard/template.service';
 
 @Injectable()
 export class DashboardService {
@@ -26,6 +29,8 @@ export class DashboardService {
     private orderRepository: Repository<Order>,
     @InjectRepository(Review)
     private reviewRepository: Repository<Review>,
+    @Inject(TemplateService)
+    private templateService: TemplateService,
   ) {}
 
   async productSummary(query: DashBoardProductQuery) {
@@ -145,7 +150,7 @@ export class DashboardService {
             else return b.id - a.id;
         }
       })
-      .slice(0, query.size);
+      .slice(0, Math.min(query.size, 10));
   }
 
   async calculateViewsPer(option: EFilterOption) {
@@ -289,63 +294,25 @@ export class DashboardService {
   }
 
   async createTemplate() {
-    // Tạo tài liệu mới
-    const doc = new Document({
-      sections: [
-        {
-          properties: {},
-          children: [
-            new Paragraph({
-              children: [new TextRun({ bold: true, text: 'Product Summary' })],
-            }),
-            new Paragraph({
-              children: [new TextRun('This is a summary of the products.')],
-            }),
-            // Thêm các thông tin khác của Product Summary nếu cần
-          ],
-        },
-        {
-          properties: {},
-          children: [
-            new Paragraph({
-              children: [new TextRun({ bold: true, text: 'Rating Summary' })],
-            }),
-            new Paragraph({
-              children: [new TextRun('This is a summary of the ratings.')],
-            }),
-            // Thêm các thông tin khác của Rating Summary nếu cần
-          ],
-        },
-        {
-          properties: {},
-          children: [
-            new Paragraph({
-              children: [new TextRun({ bold: true, text: 'Order Summary' })],
-            }),
-            new Paragraph({
-              children: [new TextRun('This is a summary of the orders.')],
-            }),
-            // Thêm các thông tin khác của Order Summary nếu cần
-          ],
-        },
-      ],
+    const { data: product } = await this.productSummary({
+      order: ESort.ASC,
+      orderBy: EProductField.NAME,
+      size: 10000,
     });
-
-    const buffer = await Packer.toBuffer(doc);
+    const { data: order } = await this.orderSummary(10000);
+    const { data: rating } = await this.ratingSummary({
+      size: 10000,
+      order: ESort.ASC,
+      orderBy: ERatingField.NAME,
+      filterBy: EFilterOption.DAILY,
+    });
+    const buffer = await Packer.toBuffer(
+      await this.templateService.report({ product, order, rating }),
+    );
     return buffer;
   }
 
   async createReport() {
-    // const query = {
-    //   size: 10000,
-    //   orderBy: '',
-    //   order: ESort.ASC,
-    //   filterBy: EFilterOption.DAILY,
-    // };
-    // const order = await this.orderSummary(query.size);
-    // const product = await this.productSummary(query as DashBoardProductQuery);
-    // const rating = await this.ratingSummary(query as DashBoardRatingQuery);
-
     return {
       file: await this.createTemplate(),
     };
